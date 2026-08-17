@@ -27,6 +27,12 @@ VIVID_SEI = bytes.fromhex(
     "0000014e01042f260004000501000be65fffffeb4ab3331198005288011c0000"
     "ffbfeff041599988cc002944008e00007fdff7fa261980")
 
+# Variant B: same SEI with two payload bytes changed (ff ff -> ee ee), so a
+# decoder that refreshes per AU shows different values on the B frames.
+VIVID_SEI_B = bytes.fromhex(
+    "0000014e01042f260004000501000be65feeeeeb4ab3331198005288011c0000"
+    "ffbfeff041599988cc002944008e00007fdff7fa261980")
+
 
 def encode_base(path):
     subprocess.run([
@@ -67,7 +73,10 @@ def split_aus(data):
 def inject(data, aus, sei, out, at=(0, 2, 4)):
     buf = b""
     for n, au in enumerate(aus):
-        if n in at:
+        if isinstance(sei, dict):
+            if n in sei:
+                buf += sei[n]
+        elif n in at:
             buf += sei
         for _, s, e in au:
             buf += data[s:e]
@@ -85,6 +94,8 @@ def main():
     assert len(aus) == 6, len(aus)
     inject(data, aus, HDR10PLUS_SEI, os.path.join(OUTDIR, "hdr10plus_multi_sei.h265"))
     inject(data, aus, VIVID_SEI, os.path.join(OUTDIR, "hdr_vivid_multi_sei.h265"))
+    inject(data, aus, {0: VIVID_SEI, 2: VIVID_SEI_B, 4: VIVID_SEI},
+           os.path.join(OUTDIR, "hdr_vivid_ab.h265"))
     os.unlink(base)
 
 
