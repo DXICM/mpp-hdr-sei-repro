@@ -95,8 +95,18 @@ authoritative reference is the per-AU bitstream table above.
 
 ## Environments observed
 
-- MPP develop v1.0.12 (8f922ed34) on RK3566 (kernel 5.10): attachment bug as
-  above, reproduced with the cross-built develop library.
-- MPP develop v1.0.12 (8f922ed3) on RK3576 and RK3588 (kernel 5.10/6.1):
-  original FFmpeg-level observation (`hevc_rkmpp` exported the metadata on
-  only 1 of 6 frames); pending re-verification with the AU-wise probe.
+- MPP develop v1.0.12 (8f922ed34) on RK3566 (kernel 5.10) and RK3576
+  (kernel 6.1.75), cross-built develop library: identical, deterministic
+  AU-wise probe result on both SoCs (frames 1-2 absent, 3-6 present; A/B
+  refresh works), with and without parser fast mode.
+- The manifestation depends on packetization:
+
+  | Feeding | Frames with dynamic meta (of 6) |
+  |---|---|
+  | AU-by-AU packets (`hdr_probe`) | 4 (frames 1-2 absent) |
+  | 8 KB chunks (mpi_dec_test style) | 6 |
+  | FFmpeg `hevc_rkmpp` (nyanmisaka/ffmpeg-rockchip PR #268 build) | 6 |
+
+  FFmpeg's current packetization masks the defect at that level; the
+  underlying SEI->frame association is still wrong and packetization-
+  dependent (the first AU's SEI is lost with clean per-AU packets).
