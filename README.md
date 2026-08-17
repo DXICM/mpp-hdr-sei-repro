@@ -22,6 +22,7 @@ Vivid) with the frames whose access units carry the SEI.
 |---|---|---|
 | `samples/hdr10plus_multi_sei.h265` | 6 all-intra frames; HDR10+ (ST 2094-40) SEI in AUs 0, 2, 4 - **primary repro** | `[1,0,1,0,1,0]` |
 | `samples/hdr_vivid_multi_sei.h265` | same base; CUVA HDR Vivid SEI in AUs 0, 2, 4 | `[1,0,1,0,1,0]` |
+| `samples/hdr10p_gop12_sei_048.h265` | **realistic case**: 12 frames, one CVS with B-frames (AUD-delimited), HDR10+ SEI in AUs 0, 4, 8 | `[1,0,0,0,1,0,0,0,1,0,0,0]` |
 | `samples/hdr_vivid_ab.h265` | same base; vivid payload **A** in AU0, modified payload **B** in AU2, A in AU4 - shows whether/when metadata is refreshed | `[A,0,B,0,A,0]` |
 | `samples/hdr_vivid_hevc.h265` | fate-suite CUVA HDR Vivid, 1 frame / 1 SEI - control | `[1]` |
 | `scripts/gen_multi_sei_samples.py` | regenerates all multi-SEI streams bit-exactly (needs ffmpeg + libx265) | - |
@@ -35,35 +36,39 @@ vivid sample (variant B = same SEI with two payload bytes changed). The
 video base is a synthetic `testsrc2` encode (Main10, all-intra, 6 frames),
 so the streams contain no licensed content.
 
-## Findings (develop 8f922ed34, RK3566, `hdr_probe`)
+## Findings (develop 8f922ed34, RK3576 kernel 6.1.75 and RK3566 kernel 5.10)
 
-Feeding complete AUs one by one (the same packetization FFmpeg's rkmppdec
-produces), with or without `MPP_DEC_SET_PARSER_FAST_MODE`:
+The parser parses every SEI (`h265d_debug=8704` shows `hdr_meta_index`
+0..3). The defect is in the **attachment of the parsed metadata to
+frames**, and it is format- and packetization-dependent.
 
-`hdr_vivid_ab.h265` (SEI A@AU0, B@AU2, A@AU4):
+**1. User-visible at FFmpeg level with a realistic stream.**
+`hdr10p_gop12_sei_048.h265` (single CVS, B-frames, HDR10+ SEI in AUs
+0/4/8), ffprobe per-frame side data, deterministic over repeated runs:
 
 ```
-frame #1 poc= 0 meta=absent            <- AU0 carries SEI A, but no metadata!
-frame #2 poc= 0 meta=absent
-frame #3 poc= 0 meta=PRESENT head=...eeee..   <- B appears (AU2 parsed)
-frame #4 poc= 0 meta=PRESENT head=...eeee..
-frame #5 poc= 0 meta=PRESENT head=...ffff..   <- back to A (AU4 parsed)
-frame #6 poc= 0 meta=PRESENT head=...ffff..
+hevc_rkmpp: 6/12 frames carry dynamic metadata  (pattern 100011011010)
+hevc (sw) : 12/12 frames
 ```
 
-- The parser parses all three SEIs (refresh works: B shows up at AU2, A
-  returns at AU4), so it is not a "parse only the first SEI" problem.
-- But the **first AU's metadata is lost**: frame 1, whose AU actually
-  carries the SEI, reports no dynamic metadata at all.
-- The result is timing-dependent: feeding the same file in 8 KB chunks
-  (mpi_dec_test style) instead attaches metadata to all 6 frames, including
-  frame 1. Same stream, same MPP, different association.
-- `hdr10plus_multi_sei.h265` behaves identically (frames 1-2 absent,
-  3-6 present) with AU-wise feeding.
+**2. All-intra streams mask it at FFmpeg level** (`hevc_rkmpp` 6/6,
+same as software), but the MPP API level (`hdr_probe`, AU-by-AU feeding,
+with or without parser fast mode) still shows wrong attachment:
 
-Expected behavior: each frame whose AU carries the SEI gets that AU's
-metadata; at minimum frame 1 must not lose AU0's SEI, and the result must
-not depend on how the caller chunks the input.
+| Stream | MPP API frames with meta (of 6) |
+|---|---|
+| CUVA Vivid, SEI in AUs 0/2/4 | 4 - first AU's SEI dropped, refresh works (A/B payloads verified) |
+| CUVA Vivid, single SEI (any AU) | 0 - a lone SEI is never attached |
+| HDR10+, SEI in AUs 0/2/4 | 0 in probe usage, while FFmpeg usage gets 6/6 |
+
+**3. Packetization-dependent:** the same stream gives different counts
+with AU-by-AU packets vs 8 KB chunks vs FFmpeg's packetization.
+
+Expected behavior: every frame whose AU carries the SEI gets that AU's
+metadata (inheritance to following frames is fine), independent of how
+the caller packets the input; in particular the first AU's SEI and lone
+SEIs must not be lost, and a normal-GOP stream must not drop metadata on
+half of its frames.
 
 ## Reproduction
 
