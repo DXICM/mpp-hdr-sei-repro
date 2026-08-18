@@ -38,14 +38,17 @@ so the streams contain no licensed content.
 
 ## Findings (develop 8f922ed34, RK3576 kernel 6.1.75 and RK3566 kernel 5.10)
 
-**Status (2026-08-18):** the maintainer fixed the residual-data part
-(frames without SEI kept stale metadata from previous frames; fix: clear
-via `mpp_frame_set_hdr_dynamic_meta(frame, NULL)` in `h265d_dpb.c`).
-Verified: frames without SEI now report NULL. What remains after the fix:
-the metadata is attached to the wrong frame - on the GOP stream the SEI is
-at poc 0/4/8 but metadata lands on poc 0/7/8; with AU-by-AU feeding the
-first AU's SEI is still dropped (SEI at AUs 0/2/4 -> only frames 3/5 get
-metadata).
+**Resolution (2026-08-18):** the maintainer's patch (clear residual
+metadata via `mpp_frame_set_hdr_dynamic_meta(frame, NULL)` in the else
+branch of `h265d_frame_create` in `h265d_dpb.c`) **fixes the bug**,
+verified on RK3566: after the fix, metadata appears exactly on the
+SEI-carrying frames. The earlier "GOP stream mis-attachment" claim in this
+repo was an analysis error - slice indices were reported as POCs; the SEIs
+actually sit at POC 0/7/8 (NAL-level dump + x265 encode-order CSV), and the
+post-fix mpi_dec_test output matches that exactly. The pre-fix 6/12 output
+was the residual-data bug itself. The only remaining oddity (first AU's SEI
+not attached under this repo's AU-by-AU probe feeding) reproduces neither
+in mpi_dec_test nor in FFmpeg and is considered a harness artifact.
 
 The parser parses every SEI (`h265d_debug=8704` shows `hdr_meta_index`
 0..3). The defect is in the **attachment of the parsed metadata to
