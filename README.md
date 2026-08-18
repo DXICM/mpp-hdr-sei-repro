@@ -38,6 +38,15 @@ so the streams contain no licensed content.
 
 ## Findings (develop 8f922ed34, RK3576 kernel 6.1.75 and RK3566 kernel 5.10)
 
+**Status (2026-08-18):** the maintainer fixed the residual-data part
+(frames without SEI kept stale metadata from previous frames; fix: clear
+via `mpp_frame_set_hdr_dynamic_meta(frame, NULL)` in `h265d_dpb.c`).
+Verified: frames without SEI now report NULL. What remains after the fix:
+the metadata is attached to the wrong frame - on the GOP stream the SEI is
+at poc 0/4/8 but metadata lands on poc 0/7/8; with AU-by-AU feeding the
+first AU's SEI is still dropped (SEI at AUs 0/2/4 -> only frames 3/5 get
+metadata).
+
 The parser parses every SEI (`h265d_debug=8704` shows `hdr_meta_index`
 0..3). The defect is in the **attachment of the parsed metadata to
 frames**, and it is format- and packetization-dependent.
